@@ -91,8 +91,32 @@ func (p *Player) animations() {
 		return []rune(strings.ReplaceAll(string(runes), old, new))
 	}
 
+	// walking
+	{
+		var a [][][]rune
+		for _, n := range []string{"player.walk.r.1", "player.walk.r.2", "player.walk.r.3", "player.walk.r.4"} {
+			a = append(a, open("data/"+n))
+		}
+		go func() {
+			var i int
+			for {
+
+				p.mu.Lock()
+				p.Player = a[i]
+				p.mu.Unlock()
+				time.Sleep(time.Duration(350) * time.Millisecond)
+				if i == len(a)-1 {
+					i = 0
+				} else {
+					i++
+				}
+			}
+		}()
+	}
+
 	// winking
 	go func() {
+		return
 		for {
 			rand.Seed(time.Now().Unix())
 			s := rand.Intn(2) + 1
@@ -109,6 +133,7 @@ func (p *Player) animations() {
 
 	// text
 	go func() {
+		return
 		texts := [][]rune{[]rune("    - ??? "), []rune("    - Huh? "), []rune("    - Who am I? Where am I? ")}
 		for {
 			if p.Moving {
@@ -130,6 +155,7 @@ func (p *Player) animations() {
 
 	// mouth
 	go func() {
+		return
 		texts := []string{"=", "e", "a", "~"}
 		for {
 			if p.Moving {

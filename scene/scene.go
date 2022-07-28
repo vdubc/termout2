@@ -44,36 +44,43 @@ func (s *Scene) Run() {
 		os.Exit(0)
 	}
 
-	evch := make(chan tcell.Event)
-	quit := make(chan struct{})
-	go s.screen.ChannelEvents(evch, quit)
+	evntCh := make(chan tcell.Event)
+	envtChQuit := make(chan struct{})
+	go s.screen.ChannelEvents(evntCh, envtChQuit)
+
+	mainChQuit := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case ev := <-evntCh:
+
+				switch ev := ev.(type) {
+				case *tcell.EventResize:
+					s.screen.Sync()
+				case *tcell.EventKey:
+					if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyCtrlC {
+						envtChQuit <- struct{}{}
+						mainChQuit <- struct{}{}
+					} else if ev.Key() == tcell.KeyCtrlL {
+						s.screen.Sync()
+					} else if ev.Rune() == 'C' || ev.Rune() == 'c' {
+						s.screen.Clear()
+					}
+				case *tcell.EventMouse:
+					switch ev.Buttons() {
+					case tcell.Button1:
+						y, x := ev.Position()
+						s.player.Move(y, x)
+					}
+				}
+			}
+		}
+	}()
 
 	for {
 		select {
-		case <-quit:
+		case <-mainChQuit:
 			quitFn()
-			break
-		case ev := <-evch:
-
-			switch ev := ev.(type) {
-			case *tcell.EventResize:
-				s.screen.Sync()
-			case *tcell.EventKey:
-				if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyCtrlC {
-					quit <- struct{}{}
-					quitFn()
-				} else if ev.Key() == tcell.KeyCtrlL {
-					s.screen.Sync()
-				} else if ev.Rune() == 'C' || ev.Rune() == 'c' {
-					s.screen.Clear()
-				}
-			case *tcell.EventMouse:
-				switch ev.Buttons() {
-				case tcell.Button1:
-					y, x := ev.Position()
-					s.player.Move(y, x)
-				}
-			}
 
 		case <-time.After(time.Millisecond * 50):
 
@@ -87,36 +94,15 @@ func (s *Scene) Run() {
 			// player
 			for x, xs := range s.player.Player {
 				for y, ys := range xs {
-					s.screen.SetContent(s.player.Pos.Y+y, s.player.Pos.X+x-len(s.player.Player), ys, nil, style)
+					yn := s.player.Pos.Y + y /*- len(s.player.Player[0])/2*/
+					xn := s.player.Pos.X + x - len(s.player.Player)
+					s.screen.SetContent(yn, xn, ys, nil, style)
 				}
 			}
 
 			// Update screen
 			s.screen.Show()
-
 		}
 	}
 
-	// for {
-
-	// 	// Poll event
-	// 	ev := s.screen.PollEvent()
-
-	// 	// Process event
-	// 	switch ev := ev.(type) {
-	// 	case *tcell.EventResize:
-	// 		s.screen.Sync()
-	// 	case *tcell.EventKey:
-	// 		if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyCtrlC {
-	// 			quit()
-	// 		} else if ev.Key() == tcell.KeyCtrlL {
-	// 			s.screen.Sync()
-	// 		} else if ev.Rune() == 'C' || ev.Rune() == 'c' {
-	// 			s.screen.Clear()
-	// 		}
-	// 	case *tcell.EventMouse:
-	// 	}
-	// 	// case <-time.After(time.Millisecond * 50):
-
-	// }
 }
