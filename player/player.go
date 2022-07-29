@@ -19,9 +19,34 @@ type Player struct {
 	speed       int64
 	lastEventTs int64
 
-	moveXCh chan struct{}
-	moveYCh chan struct{}
-	moving  bool
+	moveXCh   chan struct{}
+	moveYCh   chan struct{}
+	moving    *moving
+	walkingCh chan struct{}
+}
+
+type moving struct {
+	mu sync.Mutex
+	x  bool
+	y  bool
+}
+
+func (m *moving) setx(b bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.x = b
+}
+
+func (m *moving) sety(b bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.y = b
+}
+
+func (m *moving) get() (bool, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.x, m.y
 }
 
 type Pos struct {
@@ -38,6 +63,7 @@ func New() *Player {
 		lastEventTs: time.Now().Unix(),
 		moveXCh:     make(chan struct{}),
 		moveYCh:     make(chan struct{}),
+		moving:      new(moving),
 	}
 	// wrap spaces left/right // TODO
 
@@ -55,28 +81,58 @@ func (p *Player) Show(screen tcell.Screen) {
 			screen.SetContent(yn, xn, ys, nil, p.style)
 		}
 	}
+}
 
+func (p *Player) stop() {
+
+	p.lastEventTs = time.Now().Unix()
+
+	xb, yb := p.moving.get()
+	if xb {
+		p.moveXCh <- struct{}{}
+	}
+	if yb {
+		p.moveYCh <- struct{}{}
+	}
+
+	if p.walkingCh != nil {
+		p.walkingCh <- struct{}{}
+		p.runes = common.OpenRuneFile("data/player1")
+	}
 }
 
 func (p *Player) Move(y, x int) {
 
 	p.lastEventTs = time.Now().Unix()
 
-	if p.moving {
-		p.moveXCh <- struct{}{}
-		p.moveYCh <- struct{}{}
-	} else {
-		p.moving = true
-	}
+	xb, yb := p.moving.get()
 
-	move := func(moveXCh, moveYCh chan struct{}) {
+	if xb || yb {
+		p.stop()
+		return
+	}
+	p.moving.setx(true)
+	p.moving.sety(true)
+
+	move := func() {
+		p.walkingCh = p.walking(y, p.pos.y)
 		go func() {
 			for {
 				select {
-				case <-moveXCh:
+				case <-p.moveXCh:
+					p.moving.setx(false)
+					if _, yb := p.moving.get(); !yb {
+						p.walkingCh <- struct{}{}
+						p.runes = common.OpenRuneFile("data/player1")
+					}
 					return
-				default:
+				case <-time.After(time.Duration(p.speed) * time.Millisecond):
 					if x == p.pos.x {
+						p.moving.setx(false)
+						if _, yb := p.moving.get(); !yb {
+							p.walkingCh <- struct{}{}
+							p.runes = common.OpenRuneFile("data/player1")
+						}
 						return
 					}
 					if x != p.pos.x {
@@ -86,7 +142,6 @@ func (p *Player) Move(y, x int) {
 							p.pos.x -= 1
 						}
 					}
-					time.Sleep(time.Duration(p.speed) * time.Millisecond) // speed
 				}
 			}
 		}()
@@ -94,10 +149,20 @@ func (p *Player) Move(y, x int) {
 		go func() {
 			for {
 				select {
-				case <-moveYCh:
+				case <-p.moveYCh:
+					p.moving.sety(false)
+					if xb, _ := p.moving.get(); !xb {
+						p.walkingCh <- struct{}{}
+						p.runes = common.OpenRuneFile("data/player1")
+					}
 					return
-				default:
+				case <-time.After(time.Duration(p.speed/6) * time.Millisecond):
 					if y == p.pos.y {
+						p.moving.sety(false)
+						if xb, _ := p.moving.get(); !xb {
+							p.walkingCh <- struct{}{}
+							p.runes = common.OpenRuneFile("data/player1")
+						}
 						return
 					}
 					if y != p.pos.y {
@@ -106,14 +171,13 @@ func (p *Player) Move(y, x int) {
 						} else {
 							p.pos.y -= 1
 						}
-						time.Sleep(time.Duration(p.speed/6) * time.Millisecond) // speed
 					}
 				}
 			}
 		}()
 	}
 
-	move(p.moveXCh, p.moveYCh)
+	move()
 }
 
 func replace(runes []rune, old, new string) []rune {
@@ -229,33 +293,40 @@ func (p *Player) saying() chan struct{} {
 	return ch
 }
 
-func (p *Player) walking() {
+func (p *Player) walking(to, from int) chan struct{} {
 
 	// p.winking()
+	ch := make(chan struct{})
 
-	var a [][][]rune
-	for _, n := range []string{"player.walk.rl.1", "player.walk.rl.2", "player.walk.rl.3", "player.walk.rl.4"} {
+	go func() {
 
-		data := common.OpenRuneFile("data/" + n)
-		for i, rs := range data {
-			data[i] = []rune(strings.ReplaceAll(string(rs), "░", " "))
+		var a [][][]rune
+		for _, n := range []string{"player.walk.rl.1", "player.walk.rl.2", "player.walk.rl.3", "player.walk.rl.4"} {
+
+			data := common.OpenRuneFile("data/" + n)
+
+			if to > from || to == from {
+				a = append(a, data)
+			} else {
+				a = append(a, common.ReflectHorizontal(data))
+			}
 		}
 
-		// a = append(a, data)
-		a = append(a, common.ReflectHorizontal(data))
-	}
-	go func() {
 		var i int
 		for {
-			// p.mu.Lock()
-			p.runes = a[i]
-			// p.mu.Unlock()
-			time.Sleep(time.Duration(350) * time.Millisecond)
-			if i == len(a)-1 {
-				i = 0
-			} else {
-				i++
+			select {
+			case <-ch:
+				return
+			default:
+				p.runes = a[i]
+				time.Sleep(time.Duration(350) * time.Millisecond)
+				if i == len(a)-1 {
+					i = 0
+				} else {
+					i++
+				}
 			}
 		}
 	}()
+	return ch
 }

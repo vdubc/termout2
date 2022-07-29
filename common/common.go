@@ -35,6 +35,10 @@ func OpenRuneFile(name string) (runes [][]rune) {
 		runes = append(runes, xs)
 	}
 
+	for i, rs := range runes {
+		runes[i] = []rune(strings.ReplaceAll(string(rs), "░", " "))
+	}
+
 	return
 }
 
