@@ -19,7 +19,9 @@ type Player struct {
 	speed       int64
 	lastEventTs int64
 
-	moveCh chan struct{}
+	moveXCh chan struct{}
+	moveYCh chan struct{}
+	moving  bool
 }
 
 type Pos struct {
@@ -34,7 +36,8 @@ func New() *Player {
 		speed:       1200,
 		style:       tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorBlack),
 		lastEventTs: time.Now().Unix(),
-		moveCh:      make(chan struct{}),
+		moveXCh:     make(chan struct{}),
+		moveYCh:     make(chan struct{}),
 	}
 	// wrap spaces left/right // TODO
 
@@ -59,63 +62,58 @@ func (p *Player) Move(y, x int) {
 
 	p.lastEventTs = time.Now().Unix()
 
-	// p.moveCh <- struct{}{}
+	if p.moving {
+		p.moveXCh <- struct{}{}
+		p.moveYCh <- struct{}{}
+	} else {
+		p.moving = true
+	}
 
-	// xCh := make(chan struct{})
-	// go func(ch chan struct{}) {
-	// 	defer close(ch)
-	// 	for {
-	// 		select {
-	// 		case <-ch:
-	// 			break
-	// 		default:
-	// 			if x == p.Pos.X {
-	// 				break
-	// 			}
-	// 			if x != p.Pos.X {
-	// 				if x > p.Pos.X {
-	// 					p.Pos.X += 1
-	// 				} else {
-	// 					p.Pos.X -= 1
-	// 				}
-	// 			}
-	// 			time.Sleep(time.Duration(p.speed) * time.Millisecond) // speed
-	// 		}
-	// 	}
-	// }(xCh)
+	move := func(moveXCh, moveYCh chan struct{}) {
+		go func() {
+			for {
+				select {
+				case <-moveXCh:
+					return
+				default:
+					if x == p.pos.x {
+						return
+					}
+					if x != p.pos.x {
+						if x > p.pos.x {
+							p.pos.x += 1
+						} else {
+							p.pos.x -= 1
+						}
+					}
+					time.Sleep(time.Duration(p.speed) * time.Millisecond) // speed
+				}
+			}
+		}()
 
-	// yCh := make(chan struct{})
-	// go func(ch chan struct{}) {
-	// 	defer close(ch)
-	// 	for {
-	// 		select {
-	// 		case <-ch:
-	// 			break
-	// 		default:
-	// 			if y == p.Pos.Y {
-	// 				break
-	// 			}
-	// 			if y != p.Pos.Y {
-	// 				if y > p.Pos.Y {
-	// 					p.Pos.Y += 1
-	// 				} else {
-	// 					p.Pos.Y -= 1
-	// 				}
-	// 				time.Sleep(time.Duration(p.speed/6) * time.Millisecond) // speed
-	// 			}
-	// 		}
+		go func() {
+			for {
+				select {
+				case <-moveYCh:
+					return
+				default:
+					if y == p.pos.y {
+						return
+					}
+					if y != p.pos.y {
+						if y > p.pos.y {
+							p.pos.y += 1
+						} else {
+							p.pos.y -= 1
+						}
+						time.Sleep(time.Duration(p.speed/6) * time.Millisecond) // speed
+					}
+				}
+			}
+		}()
+	}
 
-	// 	}
-	// }(yCh)
-
-	// go func() {
-	// 	select {
-	// 	case <-p.moveCh:
-	// 		xCh <- struct{}{}
-	// 		yCh <- struct{}{}
-	// 	}
-	// }()
-
+	move(p.moveXCh, p.moveYCh)
 }
 
 func replace(runes []rune, old, new string) []rune {
