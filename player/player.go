@@ -1,211 +1,218 @@
 package player
 
 import (
-	"io/ioutil"
 	"math/rand"
-	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gdamore/tcell/v2"
+	"github.com/vdubc/termout2/common"
 )
 
 type Player struct {
-	mu     sync.Mutex
-	Room   [][]rune
-	Player [][]rune
-	Pos    Pos
-	Speed  int64
+	mu    sync.Mutex
+	runes [][]rune
+	style tcell.Style
 
-	Moving    bool
-	MovingChX chan struct{}
-	MovingChY chan struct{}
+	pos   Pos
+	speed int64
+
+	moveCh chan struct{}
 }
 
 type Pos struct {
-	X int
-	Y int
+	x int
+	y int
 }
 
 func New() *Player {
 	player := &Player{
-		Room:   room(),
-		Player: player(),
+		runes:  common.OpenRuneFile("data/player1"),
+		pos:    Pos{x: 25, y: 54},
+		speed:  1200,
+		style:  tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorBlack),
+		moveCh: make(chan struct{}),
 	}
-	// wrap spaces left/right
-	for i := range player.Player {
-		player.Player[i] = append([]rune{' '}, player.Player[i]...)
-		player.Player[i] = append(player.Player[i], ' ')
-	}
+	// wrap spaces left/right // TODO
 
-	player.Pos.X = 25
-	player.Pos.Y = 54
-	player.Speed = 1200
+	player.inactivity()
 
-	player.animations()
 	return player
 }
 
-func room() (data [][]rune) {
-	return open("data/room1")
-}
-
-func player() [][]rune {
-	return open("data/player1")
-}
-
-func open(name string) (runes [][]rune) {
-	file, err := os.Open(name)
-	if err != nil {
-		panic(err) // TODO
-	}
-	defer func() {
-		if err = file.Close(); err != nil {
-			panic(err) // TODO
+func (p *Player) Show(screen tcell.Screen) {
+	// player
+	for x, xs := range p.runes {
+		for y, ys := range xs {
+			yn := p.pos.y + y /*- len(p.Player[0])/2*/
+			xn := p.pos.x + x - len(p.runes)
+			screen.SetContent(yn, xn, ys, nil, p.style)
 		}
-	}()
-
-	b, err := ioutil.ReadAll(file)
-	if err != nil {
-		panic(err) // TODO
 	}
 
-	lines := strings.Split(string(b), "\n")
-
-	for _, line := range lines {
-		if line == "\n" || line == "" {
-			break
-		}
-		var xs []rune
-		for _, c := range line {
-			xs = append(xs, c)
-		}
-		runes = append(runes, xs)
-	}
-
-	return
-}
-
-func (p *Player) animations() {
-
-	replace := func(runes []rune, old, new string) []rune {
-		return []rune(strings.ReplaceAll(string(runes), old, new))
-	}
-
-	// walking
-	{
-		var a [][][]rune
-		for _, n := range []string{"player.walk.r.1", "player.walk.r.2", "player.walk.r.3", "player.walk.r.4"} {
-			a = append(a, open("data/"+n))
-		}
-		go func() {
-			var i int
-			for {
-
-				p.mu.Lock()
-				p.Player = a[i]
-				p.mu.Unlock()
-				time.Sleep(time.Duration(350) * time.Millisecond)
-				if i == len(a)-1 {
-					i = 0
-				} else {
-					i++
-				}
-			}
-		}()
-	}
-
-	// winking
-	go func() {
-		return
-		for {
-			rand.Seed(time.Now().Unix())
-			s := rand.Intn(2) + 1
-			time.Sleep(time.Duration(s) * time.Second)
-			p.mu.Lock()
-			p.Player[1] = replace(p.Player[1], "Oo", "--")
-			p.mu.Unlock()
-			time.Sleep(time.Duration(500) * time.Millisecond)
-			p.mu.Lock()
-			p.Player[1] = replace(p.Player[1], "--", "Oo")
-			p.mu.Unlock()
-		}
-	}()
-
-	// text
-	go func() {
-		return
-		texts := [][]rune{[]rune("    - ??? "), []rune("    - Huh? "), []rune("    - Who am I? Where am I? ")}
-		for {
-			if p.Moving {
-				continue
-			}
-			rand.Seed(time.Now().Unix())
-			s := rand.Intn(5) + 1
-			time.Sleep(time.Duration(s) * time.Second)
-			text := texts[rand.Intn(len(texts))]
-			p.mu.Lock()
-			p.Player[0] = append(p.Player[0], text...)
-			p.mu.Unlock()
-			time.Sleep(time.Duration(3) * time.Second)
-			p.mu.Lock()
-			p.Player[0] = replace(p.Player[0], string(text), "")
-			p.mu.Unlock()
-		}
-	}()
-
-	// mouth
-	go func() {
-		return
-		texts := []string{"=", "e", "a", "~"}
-		for {
-			if p.Moving {
-				continue
-			}
-			rand.Seed(time.Now().Unix())
-			s := rand.Intn(6) + 1
-			time.Sleep(time.Duration(s) * time.Second)
-			text := texts[rand.Intn(len(texts))]
-			p.mu.Lock()
-			p.Player[2] = replace(p.Player[2], "-", text)
-			p.mu.Unlock()
-			time.Sleep(time.Duration(500) * time.Millisecond)
-			p.mu.Lock()
-			p.Player[2] = replace(p.Player[2], text, "-")
-			p.mu.Unlock()
-		}
-	}()
 }
 
 func (p *Player) Move(y, x int) {
 
+	// p.moveCh <- struct{}{}
+
+	// xCh := make(chan struct{})
+	// go func(ch chan struct{}) {
+	// 	defer close(ch)
+	// 	for {
+	// 		select {
+	// 		case <-ch:
+	// 			break
+	// 		default:
+	// 			if x == p.Pos.X {
+	// 				break
+	// 			}
+	// 			if x != p.Pos.X {
+	// 				if x > p.Pos.X {
+	// 					p.Pos.X += 1
+	// 				} else {
+	// 					p.Pos.X -= 1
+	// 				}
+	// 			}
+	// 			time.Sleep(time.Duration(p.speed) * time.Millisecond) // speed
+	// 		}
+	// 	}
+	// }(xCh)
+
+	// yCh := make(chan struct{})
+	// go func(ch chan struct{}) {
+	// 	defer close(ch)
+	// 	for {
+	// 		select {
+	// 		case <-ch:
+	// 			break
+	// 		default:
+	// 			if y == p.Pos.Y {
+	// 				break
+	// 			}
+	// 			if y != p.Pos.Y {
+	// 				if y > p.Pos.Y {
+	// 					p.Pos.Y += 1
+	// 				} else {
+	// 					p.Pos.Y -= 1
+	// 				}
+	// 				time.Sleep(time.Duration(p.speed/6) * time.Millisecond) // speed
+	// 			}
+	// 		}
+
+	// 	}
+	// }(yCh)
+
+	// go func() {
+	// 	select {
+	// 	case <-p.moveCh:
+	// 		xCh <- struct{}{}
+	// 		yCh <- struct{}{}
+	// 	}
+	// }()
+
+}
+
+func replace(runes []rune, old, new string) []rune {
+	return []rune(strings.ReplaceAll(string(runes), old, new))
+}
+
+func (p *Player) winking() {
 	go func() {
 		for {
-			if x == p.Pos.X {
-				break
-			}
-			if x != p.Pos.X {
-				if x > p.Pos.X {
-					p.Pos.X += 1
-				} else {
-					p.Pos.X -= 1
-				}
-			}
-			time.Sleep(time.Duration(p.Speed) * time.Millisecond) // speed
-
+			rand.Seed(time.Now().Unix())
+			s := rand.Intn(2) + 1
+			time.Sleep(time.Duration(s) * time.Second)
+			// p.mu.Lock()
+			p.runes[1] = replace(p.runes[1], "Oo", "--")
+			// p.mu.Unlock()
+			time.Sleep(time.Duration(500) * time.Millisecond)
+			// p.mu.Lock()
+			p.runes[1] = replace(p.runes[1], "--", "Oo")
+			// p.mu.Unlock()
 		}
 	}()
+}
+
+func (p *Player) mouth() {
 	go func() {
+		texts := []string{"=", "e", "a", "~"}
 		for {
-			if y == p.Pos.Y {
-				break
-			}
-			if y != p.Pos.Y {
-				if y > p.Pos.Y {
-					p.Pos.Y += 1
-				} else {
-					p.Pos.Y -= 1
-				}
-				time.Sleep(time.Duration(p.Speed/6) * time.Millisecond) // speed
+			rand.Seed(time.Now().Unix())
+			s := rand.Intn(6) + 1
+			time.Sleep(time.Duration(s) * time.Second)
+			text := texts[rand.Intn(len(texts))]
+			// p.mu.Lock()
+			p.runes[2] = replace(p.runes[2], "-", text)
+			// p.mu.Unlock()
+			time.Sleep(time.Duration(500) * time.Millisecond)
+			// p.mu.Lock()
+			p.runes[2] = replace(p.runes[2], text, "-")
+			// p.mu.Unlock()
+		}
+	}()
+}
+
+func (p *Player) text() {
+	go func() {
+		texts := [][]rune{[]rune("    - ??? "), []rune("    - Huh? "), []rune("    - Who am I? Where am I? ")}
+		for {
+
+			rand.Seed(time.Now().Unix())
+			s := rand.Intn(5) + 1
+			time.Sleep(time.Duration(s) * time.Second)
+			text := texts[rand.Intn(len(texts))]
+			// p.mu.Lock()
+			p.runes[0] = append(p.runes[0], text...)
+			// p.mu.Unlock()
+			time.Sleep(time.Duration(3) * time.Second)
+			// p.mu.Lock()
+			p.runes[0] = replace(p.runes[0], string(text), "")
+			// p.mu.Unlock()
+		}
+	}()
+}
+
+func (p *Player) inactivity() {
+	// for {
+	// 	// p.winking()
+	// 	// p.saying()
+	// }
+
+}
+
+func (p *Player) saying() {
+	p.mouth()
+	p.text()
+}
+
+func (p *Player) walking() {
+
+	// p.winking()
+
+	var a [][][]rune
+	for _, n := range []string{"player.walk.rl.1", "player.walk.rl.2", "player.walk.rl.3", "player.walk.rl.4"} {
+
+		data := common.OpenRuneFile("data/" + n)
+		for i, rs := range data {
+			data[i] = []rune(strings.ReplaceAll(string(rs), "░", " "))
+		}
+
+		// a = append(a, data)
+		a = append(a, common.ReflectHorizontal(data))
+	}
+	go func() {
+		var i int
+		for {
+			// p.mu.Lock()
+			p.runes = a[i]
+			// p.mu.Unlock()
+			time.Sleep(time.Duration(350) * time.Millisecond)
+			if i == len(a)-1 {
+				i = 0
+			} else {
+				i++
 			}
 		}
 	}()

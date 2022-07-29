@@ -8,14 +8,14 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/vdubc/termout2/player"
+	"github.com/vdubc/termout2/room"
 	"github.com/vdubc/termout2/scene"
 )
 
 func main() {
-
-	scene := scene.New()
 	player := player.New()
-	scene.Add(player)
+	room := room.New()
+	scene := scene.New(room, player)
 	scene.Run()
 }
 

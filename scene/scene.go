@@ -6,14 +6,16 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/vdubc/termout2/player"
+	"github.com/vdubc/termout2/room"
 )
 
 type Scene struct {
 	screen tcell.Screen
+	room   *room.Room
 	player *player.Player
 }
 
-func New() *Scene {
+func New(room *room.Room, player *player.Player) *Scene {
 
 	screen, err := tcell.NewScreen()
 	if err != nil {
@@ -28,17 +30,10 @@ func New() *Scene {
 	screen.EnableMouse()
 	screen.Clear()
 
-	return &Scene{screen: screen}
-}
-
-func (s *Scene) Add(player *player.Player) {
-	s.player = player
+	return &Scene{screen: screen, room: room, player: player}
 }
 
 func (s *Scene) Run() {
-
-	style := tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorBlack) // TODO
-
 	quitFn := func() {
 		s.screen.Fini()
 		os.Exit(0)
@@ -49,7 +44,7 @@ func (s *Scene) Run() {
 	go s.screen.ChannelEvents(evntCh, envtChQuit)
 
 	mainChQuit := make(chan struct{})
-	go func() {
+	go func(evntCh chan tcell.Event, envtChQuit chan struct{}, mainChQuit chan struct{}) {
 		for {
 			select {
 			case ev := <-evntCh:
@@ -75,7 +70,7 @@ func (s *Scene) Run() {
 				}
 			}
 		}
-	}()
+	}(evntCh, envtChQuit, mainChQuit)
 
 	for {
 		select {
@@ -83,24 +78,8 @@ func (s *Scene) Run() {
 			quitFn()
 
 		case <-time.After(time.Millisecond * 50):
-
-			// room
-			for x, xs := range s.player.Room {
-				for y, ys := range xs {
-					s.screen.SetContent(y, x, ys, nil, style)
-				}
-			}
-
-			// player
-			for x, xs := range s.player.Player {
-				for y, ys := range xs {
-					yn := s.player.Pos.Y + y /*- len(s.player.Player[0])/2*/
-					xn := s.player.Pos.X + x - len(s.player.Player)
-					s.screen.SetContent(yn, xn, ys, nil, style)
-				}
-			}
-
-			// Update screen
+			s.room.Show(s.screen)
+			s.player.Show(s.screen)
 			s.screen.Show()
 		}
 	}
