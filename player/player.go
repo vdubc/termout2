@@ -15,8 +15,9 @@ type Player struct {
 	runes [][]rune
 	style tcell.Style
 
-	pos   Pos
-	speed int64
+	pos         Pos
+	speed       int64
+	lastEventTs int64
 
 	moveCh chan struct{}
 }
@@ -28,11 +29,12 @@ type Pos struct {
 
 func New() *Player {
 	player := &Player{
-		runes:  common.OpenRuneFile("data/player1"),
-		pos:    Pos{x: 25, y: 54},
-		speed:  1200,
-		style:  tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorBlack),
-		moveCh: make(chan struct{}),
+		runes:       common.OpenRuneFile("data/player1"),
+		pos:         Pos{x: 25, y: 54},
+		speed:       1200,
+		style:       tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorBlack),
+		lastEventTs: time.Now().Unix(),
+		moveCh:      make(chan struct{}),
 	}
 	// wrap spaces left/right // TODO
 
@@ -54,6 +56,8 @@ func (p *Player) Show(screen tcell.Screen) {
 }
 
 func (p *Player) Move(y, x int) {
+
+	p.lastEventTs = time.Now().Unix()
 
 	// p.moveCh <- struct{}{}
 
@@ -118,73 +122,113 @@ func replace(runes []rune, old, new string) []rune {
 	return []rune(strings.ReplaceAll(string(runes), old, new))
 }
 
-func (p *Player) winking() {
+func (p *Player) winking() chan struct{} {
+	ch := make(chan struct{})
 	go func() {
 		for {
-			rand.Seed(time.Now().Unix())
-			s := rand.Intn(2) + 1
-			time.Sleep(time.Duration(s) * time.Second)
-			// p.mu.Lock()
-			p.runes[1] = replace(p.runes[1], "Oo", "--")
-			// p.mu.Unlock()
-			time.Sleep(time.Duration(500) * time.Millisecond)
-			// p.mu.Lock()
-			p.runes[1] = replace(p.runes[1], "--", "Oo")
-			// p.mu.Unlock()
+			select {
+			case <-ch:
+				return
+			default:
+				rand.Seed(time.Now().Unix())
+				s := rand.Intn(2) + 1
+				time.Sleep(time.Duration(s) * time.Second)
+				p.runes[1] = replace(p.runes[1], "Oo", "--")
+				time.Sleep(time.Duration(500) * time.Millisecond)
+				p.runes[1] = replace(p.runes[1], "--", "Oo")
+			}
 		}
 	}()
+	return ch
 }
 
-func (p *Player) mouth() {
+func (p *Player) mouth() chan struct{} {
+	ch := make(chan struct{})
 	go func() {
 		texts := []string{"=", "e", "a", "~"}
 		for {
-			rand.Seed(time.Now().Unix())
-			s := rand.Intn(6) + 1
-			time.Sleep(time.Duration(s) * time.Second)
-			text := texts[rand.Intn(len(texts))]
-			// p.mu.Lock()
-			p.runes[2] = replace(p.runes[2], "-", text)
-			// p.mu.Unlock()
-			time.Sleep(time.Duration(500) * time.Millisecond)
-			// p.mu.Lock()
-			p.runes[2] = replace(p.runes[2], text, "-")
-			// p.mu.Unlock()
+			select {
+			case <-ch:
+				return
+			default:
+				rand.Seed(time.Now().Unix())
+				s := rand.Intn(6) + 1
+				time.Sleep(time.Duration(s) * time.Second)
+				text := texts[rand.Intn(len(texts))]
+				p.runes[2] = replace(p.runes[2], "-", text)
+				time.Sleep(time.Duration(500) * time.Millisecond)
+				p.runes[2] = replace(p.runes[2], text, "-")
+			}
 		}
 	}()
+	return ch
 }
 
-func (p *Player) text() {
+func (p *Player) text() chan struct{} {
+	ch := make(chan struct{})
 	go func() {
 		texts := [][]rune{[]rune("    - ??? "), []rune("    - Huh? "), []rune("    - Who am I? Where am I? ")}
 		for {
+			select {
+			case <-ch:
+				return
+			default:
+				rand.Seed(time.Now().Unix())
+				s := rand.Intn(5) + 1
+				time.Sleep(time.Duration(s) * time.Second)
+				text := texts[rand.Intn(len(texts))]
+				p.runes[0] = append(p.runes[0], text...)
+				time.Sleep(time.Duration(3) * time.Second)
+				p.runes[0] = replace(p.runes[0], string(text), "")
+			}
+		}
+	}()
+	return ch
+}
 
-			rand.Seed(time.Now().Unix())
-			s := rand.Intn(5) + 1
-			time.Sleep(time.Duration(s) * time.Second)
-			text := texts[rand.Intn(len(texts))]
-			// p.mu.Lock()
-			p.runes[0] = append(p.runes[0], text...)
-			// p.mu.Unlock()
-			time.Sleep(time.Duration(3) * time.Second)
-			// p.mu.Lock()
-			p.runes[0] = replace(p.runes[0], string(text), "")
-			// p.mu.Unlock()
+func (p *Player) inactivity() {
+
+	go func() {
+		var inactive bool
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+
+		var winkingCh chan struct{}
+		var sayingCh chan struct{}
+
+		for {
+			select {
+			case <-ticker.C:
+				if time.Unix(p.lastEventTs, 0).Add(3 * time.Second).Before(time.Now()) {
+					if !inactive {
+						inactive = true
+						winkingCh = p.winking()
+						sayingCh = p.saying()
+					}
+				} else if inactive {
+					winkingCh <- struct{}{}
+					sayingCh <- struct{}{}
+					inactive = false
+				}
+			}
 		}
 	}()
 }
 
-func (p *Player) inactivity() {
-	// for {
-	// 	// p.winking()
-	// 	// p.saying()
-	// }
-
-}
-
-func (p *Player) saying() {
-	p.mouth()
-	p.text()
+func (p *Player) saying() chan struct{} {
+	ch := make(chan struct{})
+	mch := p.mouth()
+	tch := p.text()
+	go func() {
+		for {
+			select {
+			case <-ch:
+				mch <- struct{}{}
+				tch <- struct{}{}
+			}
+		}
+	}()
+	return ch
 }
 
 func (p *Player) walking() {
