@@ -6,6 +6,14 @@ import (
 	"strings"
 )
 
+func OpenRuneFiles(names ...string) (runesLR [][][]rune, runesRL [][][]rune) {
+	for _, n := range names {
+		runesLR = append(runesLR, OpenRuneFile(n))
+		runesRL = append(runesRL, ReflectHorizontal(OpenRuneFile(n)))
+	}
+	return
+}
+
 func OpenRuneFile(name string) (runes [][]rune) {
 	file, err := os.Open(name)
 	if err != nil {

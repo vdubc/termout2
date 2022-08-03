@@ -23,7 +23,17 @@ type Player struct {
 	moveYCh   chan struct{}
 	moving    *moving
 	walkingCh chan struct{}
+
+	animationStandLR   [][]rune
+	animationStandRL   [][]rune
+	animationWalkingLR [][][]rune
+	animationWalkingRL [][][]rune
 }
+
+const (
+	left int = iota
+	right
+)
 
 type moving struct {
 	mu sync.Mutex
@@ -56,7 +66,6 @@ type Pos struct {
 
 func New() *Player {
 	player := &Player{
-		runes:       common.OpenRuneFile("data/player1"),
 		pos:         Pos{x: 25, y: 54},
 		speed:       1200,
 		style:       tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(tcell.ColorBlack),
@@ -65,6 +74,14 @@ func New() *Player {
 		moveYCh:     make(chan struct{}),
 		moving:      new(moving),
 	}
+
+	player.animationStandLR = common.OpenRuneFile("data/helley.stay.lr.1")
+	player.animationStandRL = common.ReflectHorizontal(common.OpenRuneFile("data/helley.stay.lr.1"))
+	player.animationWalkingLR, player.animationWalkingRL = common.OpenRuneFiles(
+		"data/helley.walk.lr.1", "data/helley.walk.lr.2", "data/helley.walk.lr.3", "data/helley.walk.lr.4")
+
+	player.runes = player.animationStandLR
+
 	// wrap spaces left/right // TODO
 
 	player.inactivity()
@@ -83,7 +100,7 @@ func (p *Player) Show(screen tcell.Screen) {
 	}
 }
 
-func (p *Player) stop() {
+func (p *Player) stop(direction int) {
 
 	p.lastEventTs = time.Now().Unix()
 
@@ -96,8 +113,7 @@ func (p *Player) stop() {
 	}
 
 	if p.walkingCh != nil {
-		p.walkingCh <- struct{}{}
-		p.runes = common.OpenRuneFile("data/player1")
+		p.walkingAnimationStop(direction)
 	}
 }
 
@@ -107,31 +123,36 @@ func (p *Player) Move(y, x int) {
 
 	xb, yb := p.moving.get()
 
+	var direction int
+	if y >= p.pos.y {
+		direction = right
+	} else {
+		direction = left
+	}
+
 	if xb || yb {
-		p.stop()
+		p.stop(direction)
 		return
 	}
 	p.moving.setx(true)
 	p.moving.sety(true)
 
 	move := func() {
-		p.walkingCh = p.walking(y, p.pos.y)
+		p.walkingCh = p.walkingAnimation(direction)
 		go func() {
 			for {
 				select {
 				case <-p.moveXCh:
 					p.moving.setx(false)
 					if _, yb := p.moving.get(); !yb {
-						p.walkingCh <- struct{}{}
-						p.runes = common.OpenRuneFile("data/player1")
+						p.walkingAnimationStop(direction)
 					}
 					return
 				case <-time.After(time.Duration(p.speed) * time.Millisecond):
 					if x == p.pos.x {
 						p.moving.setx(false)
 						if _, yb := p.moving.get(); !yb {
-							p.walkingCh <- struct{}{}
-							p.runes = common.OpenRuneFile("data/player1")
+							p.walkingAnimationStop(direction)
 						}
 						return
 					}
@@ -152,16 +173,14 @@ func (p *Player) Move(y, x int) {
 				case <-p.moveYCh:
 					p.moving.sety(false)
 					if xb, _ := p.moving.get(); !xb {
-						p.walkingCh <- struct{}{}
-						p.runes = common.OpenRuneFile("data/player1")
+						p.walkingAnimationStop(direction)
 					}
 					return
 				case <-time.After(time.Duration(p.speed/6) * time.Millisecond):
 					if y == p.pos.y {
 						p.moving.sety(false)
 						if xb, _ := p.moving.get(); !xb {
-							p.walkingCh <- struct{}{}
-							p.runes = common.OpenRuneFile("data/player1")
+							p.walkingAnimationStop(direction)
 						}
 						return
 					}
@@ -261,7 +280,7 @@ func (p *Player) inactivity() {
 		for {
 			select {
 			case <-ticker.C:
-				if time.Unix(p.lastEventTs, 0).Add(3 * time.Second).Before(time.Now()) {
+				if time.Unix(p.lastEventTs, 0).Add(5 * time.Second).Before(time.Now()) {
 					if !inactive {
 						inactive = true
 						winkingCh = p.winking()
@@ -293,23 +312,19 @@ func (p *Player) saying() chan struct{} {
 	return ch
 }
 
-func (p *Player) walking(to, from int) chan struct{} {
+func (p *Player) walkingAnimation(direction int) chan struct{} {
 
 	// p.winking()
 	ch := make(chan struct{})
 
 	go func() {
 
-		var a [][][]rune
-		for _, n := range []string{"player.walk.rl.1", "player.walk.rl.2", "player.walk.rl.3", "player.walk.rl.4"} {
-
-			data := common.OpenRuneFile("data/" + n)
-
-			if to > from || to == from {
-				a = append(a, data)
-			} else {
-				a = append(a, common.ReflectHorizontal(data))
-			}
+		var runes [][][]rune
+		switch direction {
+		case left:
+			runes = p.animationWalkingRL
+		case right:
+			runes = p.animationWalkingLR
 		}
 
 		var i int
@@ -318,9 +333,9 @@ func (p *Player) walking(to, from int) chan struct{} {
 			case <-ch:
 				return
 			default:
-				p.runes = a[i]
+				p.runes = runes[i]
 				time.Sleep(time.Duration(350) * time.Millisecond)
-				if i == len(a)-1 {
+				if i == len(runes)-1 {
 					i = 0
 				} else {
 					i++
@@ -329,4 +344,14 @@ func (p *Player) walking(to, from int) chan struct{} {
 		}
 	}()
 	return ch
+}
+
+func (p *Player) walkingAnimationStop(direction int) {
+	p.walkingCh <- struct{}{}
+	switch direction {
+	case left:
+		p.runes = p.animationStandRL
+	case right:
+		p.runes = p.animationStandLR
+	}
 }
